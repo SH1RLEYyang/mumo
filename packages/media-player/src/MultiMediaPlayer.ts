@@ -28,6 +28,7 @@ export class MultiMediaPlayer {
   private _players: MediaPlayer[] = []
   private _settings: SpectrogramSettings = { ...DEFAULT_SPEC_SETTINGS }
   private readonly _playersListeners = new Set<(players: readonly MediaPlayer[]) => void>()
+  private _lastPrimaryId: string | null = null
 
   private _audioCtx: AudioContext | null = null
   private _gainNode: GainNode | null = null
@@ -390,6 +391,17 @@ export class MultiMediaPlayer {
   private _notifyPlayersChange(): void {
     this._callbacks.onPlayersChange?.(this._players)
     for (const cb of this._playersListeners) cb(this._players)
+    // Surface the primary's current state as soon as the primary is (re)established.
+    // A player's initial load() state event can be emitted before it is registered as
+    // players[0] (addTrack pushes after awaiting load), so that event is dropped and the
+    // UI's mediaState would otherwise stay null until the next state event — onDecoded,
+    // which only fires once the entire file has been decoded. Guard on a primary-id change
+    // so secondary-track churn doesn't re-emit and clobber the primary's signals.
+    const primary = this._players[0] ?? null
+    if ((primary?.id ?? null) !== this._lastPrimaryId) {
+      this._lastPrimaryId = primary?.id ?? null
+      this._callbacks.onPrimaryStateChange?.(primary?.state ?? null)
+    }
   }
 
   private _startAudioForPlayer(player: MediaPlayer): void {
