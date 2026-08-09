@@ -104,18 +104,6 @@ export function buildContinuationHeadPlugin(): Plugin {
   })
 }
 
-function _makeHeadMarkEl(): HTMLSpanElement {
-  const span = document.createElement('span')
-  span.className = 'utt-head-mark'
-  // U+2060 word-joiner as first text character: the line-breaking algorithm
-  // processes it as real inline text in both Chrome and Firefox, so it
-  // suppresses the break between any preceding trailing space and this glyph.
-  // (A CSS ::after pseudo-element is a separate formatting object in Firefox
-  // and the WJ cannot cross that boundary.)
-  span.textContent = '⁠⤦'
-  return span
-}
-
 function _buildContinuationHeadDecos(doc: Parameters<typeof DecorationSet.create>[0]): DecorationSet {
   // Collect continuations per head, in doc order (forEach is doc order)
   const contsByHead = new Map<string, Array<{ id: string; offset: number; size: number }>>()
@@ -142,64 +130,32 @@ function _buildContinuationHeadDecos(doc: Parameters<typeof DecorationSet.create
     const head = headOffsets.get(headId)
     if (head) {
       decos.push(Decoration.node(head.offset, head.offset + head.size, { 'data-has-continuation': 'true' }))
-      decos.push(Decoration.widget(head.offset + head.size - 1, _makeHeadMarkEl, { side: 1, key: 'head-mark' }))
     }
     // All continuations except the last also get the marker
     for (let i = 0; i < conts.length - 1; i++) {
       const c = conts[i]!
       decos.push(Decoration.node(c.offset, c.offset + c.size, { 'data-has-continuation': 'true' }))
-      decos.push(Decoration.widget(c.offset + c.size - 1, _makeHeadMarkEl, { side: 1, key: 'head-mark' }))
     }
   }
 
   return DecorationSet.create(doc, decos)
 }
 
-// Continuation chain hover plugin — adds .continuation-chain-hover to all chain members on mouseover
+// Continuation tooltip plugin — shows a "continuation" tooltip when hovering the ⤤ mark.
+// (This used to also highlight every block in the chain by toggling a class directly on
+// the nodeview wrappers — a ProseMirror anti-pattern that broke clicking into those blocks
+// in Electron. That chain-highlight was removed; timeline-driven highlights use proper
+// Decorations instead: is-playing / is-looping, and BlockHighlightOverlay.)
 
 export function buildContinuationHoverPlugin(): Plugin {
   return new Plugin({
     view(editorView) {
-      let _hoveredChain: string[] = []
-
       // Tooltip element
       const tooltip = document.createElement('div')
       tooltip.className = 'continuation-tooltip'
       tooltip.textContent = 'continuation'
       tooltip.style.cssText = 'position:fixed;display:none;pointer-events:none;'
       document.body.appendChild(tooltip)
-
-      function _chainFor(id: string, doc: EditorView['state']['doc']): string[] {
-        let headId = id
-        doc.forEach((node) => {
-          if (node.attrs.id === id) {
-            const contOf = node.attrs.continuationOfId as string | null
-            if (contOf) headId = contOf
-          }
-        })
-        const chain: string[] = []
-        doc.forEach((node) => {
-          const nid = node.attrs.id as string | undefined
-          if (!nid) return
-          const contOf = node.attrs.continuationOfId as string | null
-          if (nid === headId || contOf === headId) chain.push(nid)
-        })
-        return chain
-      }
-
-      function _setChain(ids: string[], pane: HTMLElement) {
-        for (const id of _hoveredChain) {
-          pane.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)?.classList.remove('continuation-chain-hover')
-        }
-        _hoveredChain = ids
-        for (const id of ids) {
-          pane.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)?.classList.add('continuation-chain-hover')
-        }
-      }
-
-      function _isOverMark(target: HTMLElement): boolean {
-        return !!target.closest('.utt-continuation-mark')
-      }
 
       function _positionTooltipAbove(mark: HTMLElement) {
         const rect = mark.getBoundingClientRect()
@@ -210,14 +166,6 @@ export function buildContinuationHoverPlugin(): Plugin {
 
       function onMouseOver(e: MouseEvent) {
         const target = e.target as HTMLElement
-        const row = target.closest<HTMLElement>('.utt-row[data-continuation], .utt-row[data-has-continuation]')
-        if (!row) {
-          _setChain([], editorView.dom)
-          tooltip.style.display = 'none'
-          return
-        }
-        const id = row.getAttribute('data-id')
-        if (id) _setChain(_chainFor(id, editorView.state.doc), editorView.dom)
         const mark = target.closest<HTMLElement>('.utt-continuation-mark')
         if (mark) {
           _positionTooltipAbove(mark)
@@ -230,7 +178,6 @@ export function buildContinuationHoverPlugin(): Plugin {
       function onMouseOut(e: MouseEvent) {
         const to = e.relatedTarget as HTMLElement | null
         if (to?.closest('.ProseMirror')) return
-        _setChain([], editorView.dom)
         tooltip.style.display = 'none'
       }
 

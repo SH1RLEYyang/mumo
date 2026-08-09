@@ -349,8 +349,11 @@
     const timeRem = (timePx / rem) + 0.6
     el.style.setProperty('--time-w', timeRem.toFixed(2) + 'rem')
 
-    // Participant width — measure the longest participant name at the element's actual font
-    const participantPx = _measureW(longestParticipant + ':', 'font-size:0.85em;font-weight:600', el)
+    // Participant width — measure the longest participant name at the element's actual font.
+    // The separator (: / ⤤ / ⤦) renders as a width:1em inline-block, so reserve a full em
+    // (U+2003 EM SPACE) for it rather than the narrower ':' glyph — otherwise the column can
+    // be too tight and the separator wraps onto its own line under the name.
+    const participantPx = _measureW(longestParticipant + '\u2003', 'font-size:0.85em;font-weight:600', el)
     const participantRem = Math.min(Math.max(participantPx / rem + 0.6, 2), 12)
     el.style.setProperty('--participant-w', participantRem.toFixed(2) + 'rem')
 
@@ -1171,6 +1174,13 @@
   :global(.ProseMirror) {
     outline: none;
     min-height: 100%;
+    /* ProseMirror requires white-space: pre-wrap for correct caret placement
+       and posAtCoords (click-to-position) behaviour, and warns in the console
+       when it is missing. We don't import prosemirror-view/style/prosemirror.css,
+       so set it here. Meta chips (.utt-time, .utt-participant, …) override with
+       their own white-space: nowrap. */
+    white-space: pre-wrap;
+    word-wrap: break-word;
   }
 
   /* !important required: .viz-row defines its own background and comes later in
@@ -1204,11 +1214,6 @@
     counter-increment: utt-line;
   }
 
-  :global(.utt-row.continuation-chain-hover) {
-    background: rgba(74, 158, 255, 0.12);
-    box-shadow: 0 1px 0 0 #4a9eff, 0 -1px 0 0 #4a9eff;
-  }
-
   :global(.continuation-tooltip) {
     z-index: 9999;
     background: var(--color-surface-2, #2a2a2a);
@@ -1220,7 +1225,17 @@
     pointer-events: none;
   }
 
-  :global(.utt-head-mark) {
+  /* End-of-block continuation marker (⤦), shown on head/intermediate blocks.
+     A CSS ::after is safe here: generated content is NOT a real DOM node, so
+     ProseMirror's DOMObserver never sees it and can't redraw the node over it.
+     (Do NOT render this glyph as a Decoration.widget — a real child at the end
+     of the editable content injects trailing-hack nodes.) The leading U+2060
+     word-joiner keeps the glyph from wrapping onto its own line.
+     The click bug that once seemed tied to this marker was actually the
+     chain-hover plugin mutating the wrapper class; see ignoreMutation in
+     UtteranceNodeView. */
+  :global(.utt-row[data-has-continuation] .utt-content::after) {
+    content: '\2060⤦';
     color: var(--color-text-muted, #bbb);
     margin-left: 0.2em;
     user-select: none;
@@ -1301,6 +1316,10 @@
     user-select: none;
     text-align: right;
     font-size: 0.85em;
+    /* Never let the name and the inline-block separator (: / ⤤ / ⤦) break apart —
+       the separator would drop onto its own line below the name. Matches the
+       nowrap on the other meta chips (.utt-time, .utt-tier). */
+    white-space: nowrap;
   }
 
   :global(.utt-participant-sep) {

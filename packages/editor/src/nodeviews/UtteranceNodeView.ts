@@ -575,6 +575,15 @@ export class UtteranceNodeView implements NodeView {
 
   ignoreMutation(mutation: ViewMutationRecord): boolean {
     if (this._prosody?.contains(mutation.target)) return true
+    // Defense-in-depth against external code toggling classes/attributes directly
+    // on our wrapper DOM. ProseMirror's DOMObserver watches attributes and, unless
+    // told otherwise, treats an attribute change on a nodeview wrapper as an edit,
+    // redrawing the whole node and wiping a just-placed caret. The continuation
+    // chain-hover plugin used to do exactly this on every mouseover, which made
+    // continuation blocks unclickable in Electron (it has since been removed). Real
+    // content edits happen inside contentDOM, never on the wrapper, so it's always
+    // safe to ignore attribute mutations on this.dom.
+    if (mutation.type === 'attributes' && mutation.target === this.dom) return true
     return (
       this._participantEditing ||
       this.tierEl.contentEditable === 'true' ||
