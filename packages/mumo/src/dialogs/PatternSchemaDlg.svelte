@@ -13,6 +13,11 @@
   let selectedId = $state<string | null>(null)
   let newName    = $state('')
 
+  // Slot drag-reorder — mirrors the lane-reorder idiom in Timeline.svelte
+  let slotDragId    = $state<string | null>(null)
+  let slotDropId    = $state<string | null>(null)
+  let slotDropAfter = $state(false)
+
   const selected = $derived(patternSchemas.find(s => s.id === selectedId) ?? null)
 
   function create() {
@@ -44,6 +49,45 @@
   function removeSlot(slotId: string) {
     if (!selected) return
     patchSlots(selected.slots.filter(s => s.id !== slotId))
+  }
+
+  function reorderSlots(dragId: string, dropId: string, after: boolean) {
+    if (!selected || dragId === dropId) return
+    const arr = [...selected.slots]
+    const from = arr.findIndex(s => s.id === dragId)
+    if (from < 0) return
+    const [m] = arr.splice(from, 1)
+    if (!m) return
+    const to = arr.findIndex(s => s.id === dropId)
+    if (to < 0) return
+    arr.splice(after ? to + 1 : to, 0, m)
+    patchSlots(arr)
+  }
+
+  function onSlotDragStart(e: DragEvent, slotId: string) {
+    slotDragId = slotId
+    if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', slotId) }
+  }
+
+  function onSlotDragOver(e: DragEvent, slotId: string) {
+    if (!slotDragId || slotDragId === slotId) return
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    slotDropId    = slotId
+    slotDropAfter = e.clientY > rect.top + rect.height / 2
+  }
+
+  function onSlotDrop(e: DragEvent) {
+    e.preventDefault()
+    if (slotDragId && slotDropId) reorderSlots(slotDragId, slotDropId, slotDropAfter)
+    slotDragId = null
+    slotDropId = null
+  }
+
+  function onSlotDragEnd() {
+    slotDragId = null
+    slotDropId = null
   }
 
   function patchSlot(slotId: string, p: Partial<SlotSchema>) {
@@ -192,8 +236,20 @@
         {/if}
 
         {#each selected.slots as slot (slot.id)}
-          <div class="slot-block">
+          <div class="slot-block"
+               class:panel-dragging={slotDragId === slot.id}
+               class:panel-drop-before={slotDropId === slot.id && !slotDropAfter}
+               class:panel-drop-after={slotDropId === slot.id && slotDropAfter}
+               role="listitem"
+               ondragover={(e) => onSlotDragOver(e, slot.id)}
+               ondrop={onSlotDrop}
+               ondragleave={() => { if (slotDropId === slot.id) slotDropId = null }}>
             <div class="slot-header-row">
+              <div class="drag-handle" title="Drag to reorder"
+                   draggable={true}
+                   ondragstart={(e) => onSlotDragStart(e, slot.id)}
+                   ondragend={onSlotDragEnd}
+                   role="button" tabindex="-1" aria-label="Drag to reorder slot">⠿</div>
               <input class="slot-name" value={slot.name}
                      placeholder="name"
                      oninput={(e) => patchSlot(slot.id, { name: (e.currentTarget as HTMLInputElement).value })} />
@@ -417,12 +473,29 @@
     gap: 0.35rem;
   }
 
+  /* Slot drag-reorder — matches the lane-reorder styling in Timeline.svelte */
+  .slot-block.panel-dragging { opacity: 0.35; }
+  .slot-block.panel-drop-before { box-shadow: 0 -2px 0 0 var(--color-primary, #2196f3); }
+  .slot-block.panel-drop-after  { box-shadow: 0 2px 0 0 var(--color-primary, #2196f3); }
+
   .slot-header-row {
     display: flex;
     align-items: center;
     gap: 0.35rem;
     flex-wrap: wrap;
   }
+
+  .drag-handle {
+    flex-shrink: 0;
+    padding: 0 5px;
+    cursor: grab;
+    color: var(--color-text-faint, #bbb);
+    font-size: 11px;
+    line-height: 1;
+    user-select: none;
+  }
+  .drag-handle:hover { color: var(--color-text-light, #888); }
+  .drag-handle:active { cursor: grabbing; }
 
   .slot-name  { width: 90px; flex-shrink: 0; }
   .slot-label { flex: 1; min-width: 80px; }
